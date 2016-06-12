@@ -7,7 +7,8 @@ printing differences and exiting nonzero: suitable for use in cron job.
 
 ## Usage
 
-usage: docker-registry-diff [-h] [--catalog] [--verbose] --username USERNAME --password PASSWORD registries [registries ...]
+```
+$ docker-registry-diff [-h] [--catalog] [--verbose] --username USERNAME --password PASSWORD registries...
 
 Compare several Docker registries
 
@@ -20,6 +21,7 @@ optional arguments:
   --verbose            Print status updates, otherwise be silent like "diff"
   --username USERNAME  Registry username
   --password PASSWORD  Registry password
+```
 
 ## Example
 
