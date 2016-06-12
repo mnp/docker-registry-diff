@@ -1,0 +1,106 @@
+#!/usr/bin/python
+'''
+docker-registry-diff - Determine if several docker registries are in sync
+
+Usage: docker-registry-diff [-h] [--catalog] [--verbose] --username USERNAME --password PASSWORD REGISTRIES...
+
+
+
+Reading:
+ - https://docs.docker.com/registry/spec/api/
+'''
+
+import requests, pprint, os, sys, argparse
+from collections import defaultdict
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+
+parser = argparse.ArgumentParser(description='Compare several Docker registries')
+parser.add_argument('registries', nargs='+', help='Hostnames of registries')
+parser.add_argument('--catalog',  action='store_true',
+                    help='Don\'t diff, just dump a catalog of names and tags from the first registry given')
+parser.add_argument('--verbose',  action='store_true', help='Print status updates, otherwise be silent like "diff"')
+parser.add_argument('--username', required=True, help='Registry username')
+parser.add_argument('--password', required=True, help='Registry password')
+args = parser.parse_args()
+
+sites=args.registries
+
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+
+def get_site_path(site, path):
+    url = 'https://' + site + '/v2' + path
+    headers = {'Accept': 'application/vnd.docker.distribution.manifest.v2+json'}
+
+    r = requests.get(url, auth=(args.username, args.password), verify=False, headers=headers)
+    if r.status_code != 200:
+        sys.exit("code %d for %s" % (r.status_code, url))
+    writenow(".")
+    return r.json()
+
+class Vividict(dict):
+    def __missing__(self, key):
+        value = self[key] = type(self)()
+        return value
+
+def compare(thing, i, j, data):
+    if data[sites[i]] != data[sites[j]]:
+        print("comparison failed!")
+        print("%s: %s" % (sites[i], pprint.pformat(data[sites[i]])))
+        print("%s: %s" % (sites[i+1], pprint.pformat(data[sites[i+1]])))
+        exit(1)
+
+def writenow (str):
+    if (args.verbose):
+        sys.stdout.write(str)
+
+catalogs = {}
+sitetags = {}
+
+if (args.catalog):
+    catalog = get_site_path(sites[0], '/_catalog')
+    tags = {}
+    print catalog
+    for name in catalog['repositories']:
+        tags[name] = get_site_path(sites[0], '/' + name + '/tags/list')['tags']
+        print("%s: %s" % (name, " ".join(tags[name])))
+    exit(0)
+
+# compare catalogs
+writenow("checking catalogs: ")
+for site in sites:
+    catalogs[site] = get_site_path(site, '/_catalog')
+
+for i in range(len(sites) - 1):
+    compare("catalog", i, i+1, catalogs)
+
+names = catalogs[sites[0]]['repositories']
+
+# compare tags
+
+for site in sites:
+    tags = {}
+    for name in names:
+        tags[name] = get_site_path(site, '/' + name + '/tags/list')['tags']
+    sitetags[site] = tags
+writenow("ok\n")
+
+writenow("checking tags: ")
+for i in range(len(sites) - 1):
+    compare("tags", i, i+1, sitetags)
+writenow("ok\n")
+
+# Finally we can compare manifests
+
+writenow("checking manifests: ")
+for name in names:
+    for tag in tags[name]:
+        manifests = {}
+        for site in sites:
+            manifests[site] = get_site_path(site, '/' + name + '/manifests/' + tag)
+        for i in range(len(sites) - 1):
+            compare("manifests", i, i+1, manifests)
+
+writenow("ok\nfinished: okay\n")
+
+exit(0)
